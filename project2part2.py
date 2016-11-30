@@ -1,7 +1,3 @@
-# ECS 152A Fall 2013
-# Project 2, part 2.2: exponential and linear backoff
-# Authors: Abilio de Oliveira (999550263) and Alan Gutstein (997256938)
-
 import simpy
 import random
 import math
