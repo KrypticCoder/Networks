@@ -5,201 +5,137 @@ import math
 from matplotlib import pyplot
 
 SLOT_LENGTH = 1
-RANDOM_SEED = 31
+RANDOM_SEED = 29
 SIM_TIME = 500000
-MU = 1
 NUM_NODES = 10
 exp_throughput = []
 linear_throughput = []
 Lambda = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09]
 
-class host:
-    def __init__(self, env, ethernet, arrival_rate, my_id):
-        self.ethernet = ethernet#the resource
+class node:
+    def __init__(self, env, rate, my_id):
         self.env = env
-        self.transmit_slot= 0
         self.success_packets = 0
         self.flag_processing = 0
         self.packet_number = 0
-        self.arrival_rate = arrival_rate
-        self.attempts = 0
-        self.queue_len = 0
         self.id = my_id
+        self.rate = rate
+        self.N = 0
+        self.L = 0
+        self.S = 0
 
-
-    def process_packet(self, env, ethernet):
-        #print("Call process packet on Host ", self.id)
-        #print("Process takes ", process_time)
-        self.queue_len -= 1
-        #yield env.timeout(process_time)
-        #print("After call process packet, Host ", self.id, " quelength is ", self.queue_len)
+    def process_packet(self, env):
+        self.L -= 1
         #finish processing set attmpt to 0
-        self.attempts = 0
+        self.N = 0
         self.success_packets += 1
-        self.transmit_slot += 1
+        self.S += 1
   
     def packets_arrival(self, env):
         # packet arrivals
-        #print('Initiating packet arrival.')
         while True:
-             # Infinite loop for generating packets
-            yield env.timeout(random.expovariate(self.arrival_rate))
-            #print("Host ", self.id, "has incomming packet. <---------------------------------------")
-              # arrival time of one packet
-
+            # Infinite loop for generating packets
+            yield env.timeout(random.expovariate(self.rate))
+    
+            # arrival time of one packet
             self.packet_number += 1
-            self.queue_len += 1
-            #print("Host ", self.id, " queue is now ", self.queue_len)
+            self.L += 1
+            
 
-    #if collision this reset host's next transmit slot
-    def delay_transmission_exp(self):
-        self.transmit_slot = self.transmit_slot + random.randint(0, 2**min(self.attempts, 10))
-        self.attempts += 1
-        #print("Host ", self.id, " delayed packet to slot ", self.transmit_slot, " with attempts ", self.attempts)
-    def delay_transmission_lin(self):
-        self.transmit_slot = self.transmit_slot + random.randint(0, min(self.attempts, 1024)) + 1
-        self.attempts += 1
-        #print("Host ",self.id," is delayed to ", self.transmit_slot, "with attempts", self.attempts)
+    def exponential_backoff(self):
+        self.S = self.S + random.randint(0, 2**min(self.N, 10))
+        self.N += 1
+        
+    def linear_backoff(self):
+        self.S = self.S + random.randint(0, min(self.N, 1024)) + 1
+        self.N += 1
+        
 class ethernet:
-    def __init__(self, env, arrival_rate):
+    def __init__(self, env, rate, algorithm):
         self.env = env
-        self.server = simpy.Resource(env, capacity=1)
         self.slot_number = 0
         self.success_slots = 0
         self.collision_slots = 0
         self.empty_slots = 0
-        self.hosts = []
-        self.arrival_rate = arrival_rate
-        for x in range(NUM_NODES):
-            self.hosts.append(host(env, ethernet, arrival_rate, x))
+        self.list_nodes = [node(env, rate, x) for x in range(NUM_NODES)]
+        self.rate = rate
+        self.algorithm = algorithm 
 
-    def ethernet_control_exponential_delay(self):#only one line difference
+    def start(self):
     #enable packet arrival at simultaneous time
         for x in range(NUM_NODES):
-            self.env.process(self.hosts[x].packets_arrival(self.env))
+            self.env.process(self.list_nodes[x].packets_arrival(self.env))
 
         while True:
-            #wait for slot time
             yield self.env.timeout(SLOT_LENGTH)
-            #print("=====================")
-            #print("Time ", self.env.now)
-            #print("Slot number", self.slot_number)
-            request = 0 #how many request at current slot?
-            host_index = -1 #index of the first request
+
+            request = 0                 # counter used to keep track of requests at current slot
+            node_index = -1             #   index of the first request
             for x in range(NUM_NODES):
-                if(self.hosts[x].queue_len == 0):
-                    continue#don't even care if hosts have no queue, packets
+                if(self.list_nodes[x].L == 0):
+                    continue            # if list_nodes have no packets in their queue, ignore
                 
-                #hosts queue have packets,
+                # list_nodes queue have packets,
                 # update their slot if they are behind current slot
-                if((self.hosts[x].transmit_slot <= self.slot_number)):
+                if((self.list_nodes[x].S <= self.slot_number)):
                     request += 1
-                    self.hosts[x].transmit_slot = self.slot_number
-                    host_index = x
+                    self.list_nodes[x].S = self.slot_number
+                    node_index = x
 
-                #print("Host ", x, " can possibly transmit at slot ", self.hosts[x].transmit_slot, "Queue is ", self.hosts[x].queue_len)
-                #count only hosts that have stuff to transmit
-            #print("total host request at current slot: ", request)
-
-            #allow the host to process
+            # If only one node wants to transmit 
             if request == 1:
                 self.success_slots += 1
-                #print(">>Can TRANSMIT<< since request = 1")
-                self.hosts[host_index].process_packet(self.env, self.server)
+                
+                self.list_nodes[node_index].process_packet(self.env)
             
-            #more than 1 request? then go through and delay each hosts that requested
+            # If more than 1 request, go through and delay each list_nodes that requested
             elif request > 1:
                 self.collision_slots += 1
                 for x in range(NUM_NODES):
-                    if(self.hosts[x].transmit_slot == self.slot_number) and (self.hosts[x].queue_len > 0):
-                        self.hosts[x].delay_transmission_exp()
-            elif request == 0:
-                self.empty_slots += 1          
-
-            self.slot_number += 1
-
-    def ethernet_control_linear_delay(self):#only 1 line difference
-    #enable packet arrival at simultaneous time
-        for x in range(NUM_NODES):
-            self.env.process(self.hosts[x].packets_arrival(self.env))
-
-        while True:
-            #wait for slot time
-            yield self.env.timeout(SLOT_LENGTH)
-            #print("=====================")
-            #print("Time ", self.env.now)
-            #print("Slot number", self.slot_number)
-            request = 0 #how many request at current slot?
-            host_index = -1 #index of the first request
-            for x in range(NUM_NODES):
-                if(self.hosts[x].queue_len == 0):
-                    continue#don't even care if hosts have no queue, packets
-                
-                #hosts queue have packets,
-                # update their slot if they are behind current slot
-                if((self.hosts[x].transmit_slot <= self.slot_number)):
-                    request += 1
-                    self.hosts[x].transmit_slot = self.slot_number
-                    host_index = x
-
-                #print("Host ", x, " can possibly transmit at slot ", self.hosts[x].transmit_slot, "Queue is ", self.hosts[x].queue_len)
-                #count only hosts that have stuff to transmit
-            #print("total host request at current slot: ", request)
-
-            #allow the host to process
-            if request == 1:
-                self.success_slots += 1
-                #print(">>Can TRANSMIT<< since request = 1")
-                self.hosts[host_index].process_packet(self.env, self.server)
-            
-            #more than 1 request? then go through and delay each hosts that requested
-            elif request > 1:
-                self.collision_slots += 1
-                for x in range(NUM_NODES):
-                    if(self.hosts[x].transmit_slot == self.slot_number) and (self.hosts[x].queue_len > 0):
-                        self.hosts[x].delay_transmission_lin()
-
+                    if(self.list_nodes[x].S == self.slot_number) and (self.list_nodes[x].L > 0):
+                        if self.algorithm == 'exponential':
+                            self.list_nodes[x].exponential_backoff()
+                        if self.algorithm == 'linear':
+                            self.list_nodes[x].linear_backoff()
             elif request == 0:
                 self.empty_slots += 1          
 
             self.slot_number += 1
 
     def get_expthroughput(self):
-        print("lambda: ", self.arrival_rate, " throughput: ", self.success_slots/self.slot_number)
+        print("lambda: ", self.rate, " throughput: ", self.success_slots/self.slot_number)
         print("<success:", self.success_slots, " > <collision: ", self.collision_slots, " > <empty: ", self.empty_slots,
                 "> <total", self.slot_number, " >") 
         exp_throughput.append(self.success_slots/self.slot_number)
 
     def get_linearthroughput(self):
-        print("lambda: ", self.arrival_rate, " throughput: ", self.success_slots/self.slot_number)
+        print("lambda: ", self.rate, " throughput: ", self.success_slots/self.slot_number)
         print("<success:", self.success_slots, " > <collision: ", self.collision_slots, " > <empty: ", self.empty_slots,
                 "> <total", self.slot_number, " >") 
         linear_throughput.append(self.success_slots/self.slot_number)
                 
 
 def main():
-    throughput = [0]*9
    
-    print("Running Exponential backoff at simulation time ", SIM_TIME)
-    print("Please wait patiently, numbers are being calculated")
-    for arrival_rate in [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09]:
+    print("Exponential backoff")
+    for rate in [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09]:
         env = simpy.Environment()
-        myethernet = ethernet(env, arrival_rate)
-        env.process(myethernet.ethernet_control_exponential_delay())
+        myethernet = ethernet(env, rate, 'exponential')
+        env.process(myethernet.start())
         env.run(until=SIM_TIME)
         myethernet.get_expthroughput()
-    
-    print("====")
-    print("====")
-    print("Running Linear backoff at simulation time ", SIM_TIME)
-    print("Please wait patiently, numbers are being calculated")
+    print("graph will be saved as exponential_backoff.jpeg")
+    print('\n')
 
-    for arrival_rate in [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09]:
+    print("Linear backoff")
+    for rate in [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09]:
         env = simpy.Environment()
-        myethernet = ethernet(env, arrival_rate)
-        env.process(myethernet.ethernet_control_linear_delay())
+        myethernet = ethernet(env, rate, 'linear')
+        env.process(myethernet.start())
         env.run(until=SIM_TIME)
         myethernet.get_linearthroughput()
+
+    print("graph will be saved as linear_backoff.jpeg")
 
 
     pyplot.plot(Lambda, exp_throughput)
@@ -207,7 +143,7 @@ def main():
     pyplot.ylabel('throughput (pkts/sec)')
     pyplot.title('Project 2, part 2.1: exponential backoff')
     pyplot.grid(True)
-    pyplot.savefig("Proj2exp.jpeg")
+    pyplot.savefig("exponential_backoff.jpeg")
 
     pyplot.clf() # clear the image
 
@@ -216,6 +152,6 @@ def main():
     pyplot.ylabel('throughput (pkts/sec)')
     pyplot.title('Project 2, part 2.2: linear backoff')
     pyplot.grid(True)
-    pyplot.savefig("Proj2linear.jpeg")
+    pyplot.savefig("linear_backoff.jpeg")
 
 if __name__ == '__main__': main()
