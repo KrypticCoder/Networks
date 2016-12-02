@@ -136,21 +136,23 @@ def main():
 
     print("graph will be saved as linear_backoff.jpeg")
 
+    try:
+        pyplot.plot(Lambda, exp_throughput)
+        pyplot.xlabel('arrival rate (pkts/sec)')
+        pyplot.ylabel('throughput (pkts/sec)')
+        pyplot.title('Project 2, part 2.1: exponential backoff')
+        pyplot.grid(True)
+        pyplot.savefig("exponential_backoff.jpeg")
 
-    pyplot.plot(Lambda, exp_throughput)
-    pyplot.xlabel('arrival rate (pkts/sec)')
-    pyplot.ylabel('throughput (pkts/sec)')
-    pyplot.title('Project 2, part 2.1: exponential backoff')
-    pyplot.grid(True)
-    pyplot.savefig("exponential_backoff.jpeg")
+        pyplot.clf() # clear the image
 
-    pyplot.clf() # clear the image
-
-    pyplot.plot(Lambda, linear_throughput)
-    pyplot.xlabel('arrival rate (pkts/sec)')
-    pyplot.ylabel('throughput (pkts/sec)')
-    pyplot.title('Project 2, part 2.2: linear backoff')
-    pyplot.grid(True)
-    pyplot.savefig("linear_backoff.jpeg")
+        pyplot.plot(Lambda, linear_throughput)
+        pyplot.xlabel('arrival rate (pkts/sec)')
+        pyplot.ylabel('throughput (pkts/sec)')
+        pyplot.title('Project 2, part 2.2: linear backoff')
+        pyplot.grid(True)
+        pyplot.savefig("linear_backoff.jpeg")
+    except:
+        print ("Graph function not supported")
 
 if __name__ == '__main__': main()
